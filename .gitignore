@@ -1,4 +1,5 @@
-./todo
-./deploy.sh
-./samples/
+deploy.sh
+tdl
+todo
+samples/
 
