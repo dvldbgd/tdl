@@ -27,5 +27,5 @@ go build -o tdl main.go
 mv tdl /usr/local/bin/
 ```
 
-For detailed usage, see [USAGE](usage.README.md)
+For detailed usage, see [USAGE](usage/README.md)
 
