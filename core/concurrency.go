@@ -1,4 +1,4 @@
-package codes
+package core
 
 import (
 	"fmt"

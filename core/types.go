@@ -1,4 +1,4 @@
-package codes
+package core
 
 // Comment represents a tagged comment found in a file.
 type Comment struct {
