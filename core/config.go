@@ -4,13 +4,28 @@ import "strings"
 
 // singleLineCommentMap defines the mapping between comment characters and supported file extensions.
 var singleLineCommentMap = map[string][]string{
-	"//": {".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".rs", ".scala",
-		".ts", ".js", ".jsx", ".tsx"},
-	"#": {".py", ".rb", ".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml", ".pl", ".pm", ".mk",
-		"makefile", "dockerfile", ".ini"},
-	";":   {".lisp", ".clj", ".scm", ".s", ".asm"},
-	"--":  {".lua", ".hs", ".sql", ".adb"},
-	"'":   {".vb", ".vbs"},
+	"//": {
+		".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".rs", ".scala",
+		".ts", ".js", ".jsx", ".tsx",
+	},
+
+	"#": {
+		".py", ".rb", ".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml", ".pl", ".pm", ".mk",
+		"makefile", "dockerfile", ".ini",
+	},
+
+	";": {
+		".lisp", ".clj", ".scm", ".s", ".asm",
+	},
+
+	"--": {
+		".lua", ".hs", ".sql", ".adb",
+	},
+
+	"'": {
+		".vb", ".vbs",
+	},
+
 	".. ": {".rst"},
 }
 
