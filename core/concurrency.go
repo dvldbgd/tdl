@@ -7,7 +7,12 @@ import (
 )
 
 // RunExtractCommentsConcurrently runs ExtractComments in parallel for multiple files.
-func RunExtractCommentsConcurrently(files []string, maxWorkers int, tags string, ignoreErrors bool) map[string][]Comment {
+func RunExtractCommentsConcurrently(
+	files []string,
+	maxWorkers int,
+	tags string,
+	ignoreErrors bool,
+) map[string][]Comment {
 	if maxWorkers <= 0 {
 		maxWorkers = runtime.NumCPU()
 	}
