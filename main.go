@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
-	"tdl/codes"
+	"tdl/core"
 )
 
 // Entry point of the TODO/Comment scanner application.
@@ -28,17 +28,17 @@ func main() {
 	flag.Parse() // Parse command-line arguments
 
 	// Get all file paths under the specified directory
-	files, err := codes.GetAllFilePaths(*dirpath)
+	files, err := core.GetAllFilePaths(*dirpath)
 	if err != nil {
 		fmt.Println("Error scanning directory:", err)
 		return
 	}
 
 	// Extract comments concurrently from all files
-	results := codes.RunExtractCommentsConcurrently(files, *workers, *tag, *ignore)
+	results := core.RunExtractCommentsConcurrently(files, *workers, *tag, *ignore)
 
 	// Display extracted comments with optional color
-	codes.PrettyPrintComments(results, *color)
+	core.PrettyPrintComments(results, *color)
 
 	// Optional summary: total files scanned and comments found
 	totalComments := 0
