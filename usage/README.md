@@ -1,73 +1,119 @@
 # TDL Usage Guide
 
-This document explains how to use the `tdl` command-line tool to scan your codebase and extract tagged comments.
+This document explains how to use the `tdl` command-line tool to manage your project and scan your codebase for tagged comments.
 
----
+## Commands
 
-## Command
+### Initialize a `.tdl` directory
 
 ```bash
-tdl [options]
+tdl init
 ```
 
-`tdl` scans files recursively in a specified directory and extracts comments containing tags such as `TODO`, `FIXME`, `NOTE`, `HACK`, `BUG`, `OPTIMIZE`, and `DEPRECATE`.
+- Creates a `.tdl` directory in the current working directory.
+- If it already exists, TDL will notify you and do nothing.
 
 ---
 
-## Available Flags
+### Destroy the `.tdl` directory
 
-| Flag         | Type   | Default             | Description                                                                           |
-| ------------ | ------ | ------------------- | ------------------------------------------------------------------------------------- |
-| `-dirpath`   | string | `.`                 | Directory to recursively scan. Accepts relative or absolute paths.                    |
-| `-tag`       | string | All supported       | Comma-separated list of tags to filter (e.g., `TODO,FIXME`).                          |
-| `-color`     | bool   | `true`              | Enable colorized output for easier readability.                                       |
-| `-ignore`    | bool   | `true`              | Skip unsupported file extensions silently without printing errors.                    |
-| `-workers`   | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning.                           |
-| `-output`    | string | Empty               | Holds the file format in which the output file containing the comments are written in |
-| `-outputdir` | string | Empty               | Holds the path to directory to which the output file must be written                  |
-| `-summarize` | Bool   | false               | Gives a tag frequency of the entire codebase                                          |
+```bash
+tdl destroy
+```
+
+- Deletes the `.tdl` directory and all its contents.
+- Prompts for confirmation before deletion.
+- Example confirmation:
+
+```
+Are you sure you want to destroy '.tdl'? (y/N):
+```
+
+---
+
+### Scan your codebase for tagged comments
+
+```bash
+tdl scan [options]
+```
+
+- Recursively scans files in a specified directory.
+- Extracts comments containing tags: `TODO`, `FIXME`, `NOTE`, `HACK`, `BUG`, `OPTIMIZE`, `DEPRECATE`.
+
+---
+
+## Scan Options (Flags)
+
+| Flag         | Type   | Default             | Description                                                        |
+| ------------ | ------ | ------------------- | ------------------------------------------------------------------ |
+| `-dirpath`   | string | `.`                 | Directory to recursively scan. Accepts relative or absolute paths. |
+| `-tag`       | string | All supported       | Comma-separated list of tags to filter (e.g., `TODO,FIXME`).       |
+| `-color`     | bool   | `true`              | Enable colorized output for easier readability.                    |
+| `-ignore`    | bool   | `true`              | Skip unsupported file extensions silently without printing errors. |
+| `-workers`   | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning.        |
+| `-output`    | string | Empty               | File format for saving results (`json`, `yaml`, `text`).           |
+| `-outputdir` | string | `.`                 | Directory path to save the output file.                            |
+| `-summarize` | bool   | `false`             | Prints the frequency of each tag in the scanned codebase.          |
 
 ---
 
 ## Examples
 
-### Scan the current directory for all supported tags with color
+### Initialize the `.tdl` directory
 
 ```bash
-tdl
+tdl init
+```
+
+### Destroy the `.tdl` directory (with confirmation)
+
+```bash
+tdl destroy
+```
+
+### Scan the current directory for all supported tags
+
+```bash
+tdl scan
 ```
 
 ### Scan a specific directory for TODO and FIXME comments only
 
 ```bash
-tdl -dirpath ./myproject -tag TODO,FIXME
+tdl scan -dirpath ./myproject -tag TODO,FIXME
 ```
 
 ### Disable colored output
 
 ```bash
-tdl -color false
+tdl scan -color=false
 ```
 
 ### Use 4 concurrent workers
 
 ```bash
-tdl -workers 4
+tdl scan -workers=4
 ```
 
-### Ignore unsupported file errors (default behavior)
+### Save results to a JSON file
 
 ```bash
-tdl -ignore true
+tdl scan -output=json -outputdir=reports
+```
+
+### Show a summary of all tags in the codebase
+
+```bash
+tdl scan -summarize
 ```
 
 ---
 
 ## Notes
 
-- **Supported file types** include Go, Python, JavaScript, C, C++, Java, Lua, Bash, YAML, and more. The full mapping is defined in `codes/core.go` under `singleLineCommentMap`.
-- `.gitignore` rules are respected only if files are **untracked**. Already tracked files will still be scanned.
-- For large projects, increasing the number of workers may improve performance, but too many may overload the system.
+- **Supported file types** include Go, Python, JavaScript, C, C++, Java, Lua, Bash, YAML, and more. See `core.go` for the full mapping in `singleLineCommentMap`.
+- `.gitignore` rules are respected only for **untracked** files; tracked files will still be scanned.
+- For large projects, increasing the number of workers can improve performance, but too many may overload the system.
 
 ---
 
@@ -79,13 +125,15 @@ File: ./main.go
     45  // FIXME: Optimize this loop
 ```
 
-Colored output highlights different tags for quick scanning:
+- Colored output highlights tags for quick scanning:
 
-- `TODO` → Yellow
-- `FIXME` → Red
-- `NOTE` → Cyan
-- `HACK` → Magenta
-- `BUG` → Bright Red
-- `OPTIMIZE` → Green
-- `DEPRECATE` → Gray
+| Tag       | Color      |
+| --------- | ---------- |
+| TODO      | Yellow     |
+| FIXME     | Red        |
+| NOTE      | Cyan       |
+| HACK      | Magenta    |
+| BUG       | Bright Red |
+| OPTIMIZE  | Green      |
+| DEPRECATE | Gray       |
 
