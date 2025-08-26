@@ -16,13 +16,15 @@ tdl [options]
 
 ## Available Flags
 
-| Flag       | Type   | Default             | Description                                                        |
-| ---------- | ------ | ------------------- | ------------------------------------------------------------------ |
-| `-dirpath` | string | `.`                 | Directory to recursively scan. Accepts relative or absolute paths. |
-| `-tag`     | string | All supported       | Comma-separated list of tags to filter (e.g., `TODO,FIXME`).       |
-| `-color`   | bool   | `true`              | Enable colorized output for easier readability.                    |
-| `-ignore`  | bool   | `true`              | Skip unsupported file extensions silently without printing errors. |
-| `-workers` | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning.        |
+| Flag         | Type   | Default             | Description                                                                           |
+| ------------ | ------ | ------------------- | ------------------------------------------------------------------------------------- |
+| `-dirpath`   | string | `.`                 | Directory to recursively scan. Accepts relative or absolute paths.                    |
+| `-tag`       | string | All supported       | Comma-separated list of tags to filter (e.g., `TODO,FIXME`).                          |
+| `-color`     | bool   | `true`              | Enable colorized output for easier readability.                                       |
+| `-ignore`    | bool   | `true`              | Skip unsupported file extensions silently without printing errors.                    |
+| `-workers`   | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning.                           |
+| `-output`    | string | Empty               | Holds the file format in which the output file containing the comments are written in |
+| `-outputdir` | string | Empty               | Holds the path to directory to which the output file must be written                  |
 
 ---
 
