@@ -16,6 +16,7 @@ func main() {
 	workers := flag.Int("workers", runtime.NumCPU(), "Number of concurrent worker goroutines")
 	output := flag.String("output", "", "Output format (json, yaml, text). Leave empty to skip file output.")
 	outputdir := flag.String("outputdir", ".", "Output dir for the resulting ouput file")
+	summarize := flag.Bool("summarize", false, "Print the frequency of each tag in the code base")
 
 	// Custom usage message
 	flag.Usage = func() {
@@ -41,6 +42,22 @@ func main() {
 			fmt.Println("Error writing output:", err)
 		}
 		return
+	}
+
+	if *summarize {
+		tags := map[string]int{"TODO": 0, "FIXME": 0, "NOTE": 0, "HACK": 0, "BUG": 0, "OPTIMIZE": 0, "DEPRECATE": 0}
+
+		for _, result := range results {
+			for _, c := range result {
+				tags[c.Tag]++
+			}
+		}
+
+		for tag, count := range tags {
+			fmt.Printf("%s : %d\n", tag, count)
+		}
+		return
+
 	}
 
 	// Normal flow: pretty-print and summary
