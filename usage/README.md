@@ -25,6 +25,7 @@ tdl [options]
 | `-workers`   | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning.                           |
 | `-output`    | string | Empty               | Holds the file format in which the output file containing the comments are written in |
 | `-outputdir` | string | Empty               | Holds the path to directory to which the output file must be written                  |
+| `-summarize` | Bool   | false               | Gives a tag frequency of the entire codebase                                          |
 
 ---
 
