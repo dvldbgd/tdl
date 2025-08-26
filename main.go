@@ -7,16 +7,15 @@ import (
 	"tdl/core"
 )
 
-// Entry point of the TODO/Comment scanner application.
-// This program recursively scans a specified directory for source files
-// and extracts comments matching certain tags (e.g., TODO, FIXME).
 func main() {
-	// Command-line flags:
-	dirpath := flag.String("dirpath", ".", "Directory to recursively scan for files")          // Root directory to scan
-	tag := flag.String("tag", "", "Comma-separated tags to filter by (TODO, FIXME, etc.)")     // Filter comments by these tags
-	color := flag.Bool("color", true, "Enable colorized output")                               // Enable colored terminal output
-	ignore := flag.Bool("ignore", true, "Skip unsupported file extensions silently")           // Ignore unsupported file types without error
-	workers := flag.Int("workers", runtime.NumCPU(), "Number of concurrent worker goroutines") // Concurrency level
+	// Command-line flags
+	dirpath := flag.String("dirpath", ".", "Directory to recursively scan for files")
+	tag := flag.String("tag", "", "Comma-separated tags to filter by (TODO, FIXME, etc.)")
+	color := flag.Bool("color", true, "Enable colorized output")
+	ignore := flag.Bool("ignore", true, "Skip unsupported file extensions silently")
+	workers := flag.Int("workers", runtime.NumCPU(), "Number of concurrent worker goroutines")
+	output := flag.String("output", "", "Output format (json, yaml, text). Leave empty to skip file output.")
+	outputdir := flag.String("outputdir", ".", "Output dir for the resulting ouput file")
 
 	// Custom usage message
 	flag.Usage = func() {
@@ -24,23 +23,29 @@ func main() {
 		fmt.Println("Options:")
 		flag.PrintDefaults()
 	}
+	flag.Parse()
 
-	flag.Parse() // Parse command-line arguments
-
-	// Get all file paths under the specified directory
+	// Step 1: gather files
 	files, err := core.GetAllFilePaths(*dirpath)
 	if err != nil {
 		fmt.Println("Error scanning directory:", err)
 		return
 	}
 
-	// Extract comments concurrently from all files
+	// Step 2: extract comments concurrently
 	results := core.RunExtractCommentsConcurrently(files, *workers, *tag, *ignore)
 
-	// Display extracted comments with optional color
+	// Step 3: if output flag is set, write file and exit
+	if *output != "" {
+		if err := core.PrepareOutputFile(results, *output, *outputdir); err != nil {
+			fmt.Println("Error writing output:", err)
+		}
+		return
+	}
+
+	// Normal flow: pretty-print and summary
 	core.PrettyPrintComments(results, *color)
 
-	// Optional summary: total files scanned and comments found
 	totalComments := 0
 	for _, cs := range results {
 		totalComments += len(cs)
