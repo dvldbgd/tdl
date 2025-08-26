@@ -17,24 +17,19 @@ var singleLineCommentMap = map[string][]string{
 		".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".rs", ".scala",
 		".ts", ".js", ".jsx", ".tsx",
 	},
-
 	"#": {
 		".py", ".rb", ".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml", ".pl", ".pm", ".mk",
 		"makefile", "dockerfile", ".ini",
 	},
-
 	";": {
 		".lisp", ".clj", ".scm", ".s", ".asm",
 	},
-
 	"--": {
 		".lua", ".hs", ".sql", ".adb",
 	},
-
 	"'": {
 		".vb", ".vbs",
 	},
-
 	".. ": {".rst"},
 }
 
@@ -52,7 +47,7 @@ var SupportedTags = map[string]struct{}{
 // extensionToCommentChar maps a file extension to its comment character for quick lookup.
 var extensionToCommentChar map[string]string
 
-// init initializes the extensionToCommentChar mapping.
+// init initializes the extensionToCommentChar mapping for fast extension lookup.
 func init() {
 	extensionToCommentChar = make(map[string]string)
 	for commentChar, extensions := range singleLineCommentMap {
@@ -62,7 +57,7 @@ func init() {
 	}
 }
 
-// RunExtractCommentsConcurrently runs ExtractComments in parallel for multiple files.
+// RunExtractCommentsConcurrently runs ExtractComments in parallel for multiple files using a worker pool.
 func RunExtractCommentsConcurrently(
 	files []string,
 	maxWorkers int,
@@ -81,7 +76,7 @@ func RunExtractCommentsConcurrently(
 	var waitGroup sync.WaitGroup
 	fileChannel := make(chan string)
 
-	// Worker goroutine for extracting comments
+	// Worker goroutine: processes files from channel and extracts comments.
 	worker := func() {
 		defer waitGroup.Done()
 		for file := range fileChannel {
@@ -97,12 +92,13 @@ func RunExtractCommentsConcurrently(
 		}
 	}
 
+	// Launch workers
 	waitGroup.Add(maxWorkers)
 	for i := 0; i < maxWorkers; i++ {
 		go worker()
 	}
 
-	// Feed files into the worker pool
+	// Feed file paths into the channel
 	go func() {
 		for _, filePath := range files {
 			fileChannel <- filePath
@@ -116,7 +112,7 @@ func RunExtractCommentsConcurrently(
 
 // ExtractComments reads a file line by line and extracts comments containing specified tags.
 func ExtractComments(filePath string, tags string) ([]Comment, error) {
-	// Determine file extension or fallback to filename for files like "Makefile"
+	// Determine file extension or fallback to filename for cases like "Makefile"
 	fileExtension := strings.ToLower(filepath.Ext(filePath))
 	if fileExtension == "" {
 		fileExtension = strings.ToLower(filepath.Base(filePath))
@@ -135,25 +131,33 @@ func ExtractComments(filePath string, tags string) ([]Comment, error) {
 
 	var extractedComments []Comment
 	scanner := bufio.NewScanner(file)
+
+	// Increase scanner buffer to handle very long lines safely (default 64KB)
+	const maxCapacity = 1024 * 1024 // 1MB
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxCapacity)
+
 	lineNumber := 0
 	tagsToCheck := parseTags(tags)
 
 	for scanner.Scan() {
 		lineNumber++
-		lineText := scanner.Text() // preserve original spacing
+		lineText := scanner.Text()
 
-		// Locate comment start in the line
+		// Find the comment start marker in the line
 		commentStartIndex := strings.Index(lineText, commentChar)
 		if commentStartIndex == -1 {
 			continue
 		}
 
-		commentText := strings.TrimSpace(lineText[commentStartIndex:]) // extract comment text only
+		// Extract the comment substring
+		commentText := strings.TrimSpace(lineText[commentStartIndex:])
 		foundTag := findTag(commentText, tagsToCheck)
 		if foundTag == "" {
 			continue
 		}
 
+		// Append comment metadata to results
 		extractedComments = append(extractedComments, Comment{
 			Tag:        foundTag,
 			Content:    commentText,
@@ -170,7 +174,7 @@ func ExtractComments(filePath string, tags string) ([]Comment, error) {
 }
 
 // parseTags converts a comma-separated string into a set of uppercase tags.
-// If empty, it defaults to all SupportedTags.
+// If empty, defaults to all supported tags.
 func parseTags(tags string) map[string]struct{} {
 	tagSet := make(map[string]struct{})
 	if strings.TrimSpace(tags) == "" {
@@ -199,22 +203,57 @@ func findTag(commentText string, tags map[string]struct{}) string {
 	return ""
 }
 
-// GetAllFilePaths recursively collects all file paths under the given root directory.
+// isBinaryFile checks the first few KB of a file for NUL bytes to detect binaries.
+func isBinaryFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false // fail open → treat as text, caller decides
+	}
+	defer f.Close()
+
+	buf := make([]byte, 8000) // read up to 8KB
+	n, _ := f.Read(buf)
+	for i := 0; i < n; i++ {
+		if buf[i] == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAllFilePaths recursively collects supported file paths under the given root directory.
+// It filters by known extensions and skips binary files.
 func GetAllFilePaths(rootDir string) ([]string, error) {
 	var collectedFiles []string
 	err := filepath.WalkDir(rootDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if !entry.IsDir() {
-			collectedFiles = append(collectedFiles, path)
+		if entry.IsDir() {
+			return nil
 		}
+
+		// Match extension or special filename (e.g., Makefile)
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == "" {
+			ext = strings.ToLower(filepath.Base(path))
+		}
+		if _, ok := extensionToCommentChar[ext]; !ok {
+			return nil // unsupported extension → skip
+		}
+
+		// Skip binary files
+		if isBinaryFile(path) {
+			return nil
+		}
+
+		collectedFiles = append(collectedFiles, path)
 		return nil
 	})
 	return collectedFiles, err
 }
 
-// PrettyPrintComments displays extracted comments in a readable format, optionally with colors.
+// PrettyPrintComments displays extracted comments in a formatted way, optionally colorized.
 func PrettyPrintComments(commentsMap map[string][]Comment, colorize bool) {
 	const resetColor = "\033[0m"
 	tagColors := map[string]string{
@@ -240,7 +279,7 @@ func PrettyPrintComments(commentsMap map[string][]Comment, colorize bool) {
 			continue
 		}
 
-		// Sort comments by line number
+		// Sort comments by line number before printing
 		sort.Slice(comments, func(i, j int) bool {
 			return comments[i].LineNumber < comments[j].LineNumber
 		})
@@ -263,9 +302,9 @@ func PrettyPrintComments(commentsMap map[string][]Comment, colorize bool) {
 
 // Comment represents a tagged comment found in a file.
 type Comment struct {
-	Tag        string // The tag type (TODO, FIXME, etc.)
-	Content    string // The full comment content including the tag
-	FilePath   string // Absolute or relative path of the file
-	LineNumber int    // Line number in the file where comment was found
+	Tag        string // Tag type (TODO, FIXME, etc.)
+	Content    string // Full comment text
+	FilePath   string // File path
+	LineNumber int    // Line number in the file
 }
 
