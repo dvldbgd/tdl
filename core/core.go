@@ -52,7 +52,6 @@ func init() {
 }
 
 // RunExtractCommentsConcurrently runs ExtractComments in parallel for multiple files.
-// Returns a map[filePath] -> []Comment.
 func RunExtractCommentsConcurrently(files []string, maxWorkers int, tags string, ignoreErrors bool) map[string][]Comment {
 	results := make(map[string][]Comment)
 	if len(files) == 0 {
@@ -68,7 +67,7 @@ func RunExtractCommentsConcurrently(files []string, maxWorkers int, tags string,
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	ch := make(chan string, len(files)) // buffered to avoid blocking
+	ch := make(chan string, len(files))
 
 	worker := func() {
 		defer wg.Done()
@@ -99,8 +98,7 @@ func RunExtractCommentsConcurrently(files []string, maxWorkers int, tags string,
 	return results
 }
 
-// PrepareOutputFile writes results into comments.<format>.
-// Supported formats: json, yaml/yml, text/txt.
+// PrepareOutputFile writes results to a file (json/yaml/text)
 func PrepareOutputFile(results map[string][]Comment, format string, outputDir string) error {
 	var all []Comment
 	for _, list := range results {
@@ -114,7 +112,6 @@ func PrepareOutputFile(results map[string][]Comment, format string, outputDir st
 	fileName := "comments." + ext
 	outPath := filepath.Join(outputDir, fileName)
 
-	// Ensure the directory exists
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -152,7 +149,7 @@ func PrepareOutputFile(results map[string][]Comment, format string, outputDir st
 	return nil
 }
 
-// ExtractComments reads a file line by line and extracts tagged comments.
+// ExtractComments reads a file and extracts tagged comments
 func ExtractComments(filePath, tags string) ([]Comment, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext == "" {
@@ -160,7 +157,6 @@ func ExtractComments(filePath, tags string) ([]Comment, error) {
 	}
 	char, ok := extensionToChar[ext]
 	if !ok {
-		// unsupported extension; caller likely filters these already
 		return nil, nil
 	}
 
@@ -184,7 +180,7 @@ func ExtractComments(filePath, tags string) ([]Comment, error) {
 		if pos == -1 {
 			continue
 		}
-		text := strings.TrimSpace(line[pos+len(char):]) // remove comment marker
+		text := strings.TrimSpace(line[pos+len(char):])
 
 		if tag := findTag(text, tagSet); tag != "" {
 			out = append(out, Comment{
@@ -202,7 +198,7 @@ func ExtractComments(filePath, tags string) ([]Comment, error) {
 	return out, nil
 }
 
-// parseTags returns a set of tags to match. If input empty, returns full supported set.
+// parseTags parses tag filter string
 func parseTags(tags string) map[string]struct{} {
 	if strings.TrimSpace(tags) == "" {
 		set := make(map[string]struct{}, len(supportedTagsLookup))
@@ -221,7 +217,7 @@ func parseTags(tags string) map[string]struct{} {
 	return set
 }
 
-// findTag safely matches tags using word boundaries to avoid false positives.
+// findTag matches text against allowed tags
 func findTag(text string, tags map[string]struct{}) string {
 	upper := strings.ToUpper(text)
 	for t := range tags {
@@ -233,7 +229,7 @@ func findTag(text string, tags map[string]struct{}) string {
 	return ""
 }
 
-// isBinaryFile checks the first few KB of a file for NUL bytes to detect binaries.
+// isBinaryFile detects binary files
 func isBinaryFile(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -251,7 +247,7 @@ func isBinaryFile(path string) bool {
 	return false
 }
 
-// GetAllFilePaths recursively collects supported file paths under the given root directory.
+// GetAllFilePaths recursively collects files
 func GetAllFilePaths(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
@@ -277,7 +273,7 @@ func GetAllFilePaths(root string) ([]string, error) {
 	return out, err
 }
 
-// PrettyPrintComments displays extracted comments in a formatted way, optionally colorized.
+// PrettyPrintComments displays comments nicely
 func PrettyPrintComments(m map[string][]Comment, color bool) {
 	const reset = "\033[0m"
 	colors := map[string]string{
@@ -290,7 +286,6 @@ func PrettyPrintComments(m map[string][]Comment, color bool) {
 		"DEPRECATE": "\033[90m",
 	}
 
-	// deterministic file order
 	files := make([]string, 0, len(m))
 	for f := range m {
 		files = append(files, f)

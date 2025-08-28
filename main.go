@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
 	"tdl/core"
 )
 
@@ -23,6 +22,8 @@ func main() {
 		destroyTdl()
 	case "scan":
 		scanCodeBase(os.Args[2:])
+	case "print":
+		printComments()
 	default:
 		fmt.Println("Unknown command:", os.Args[1])
 		os.Exit(1)
@@ -33,15 +34,12 @@ func main() {
 func initTdl() {
 	dirName := ".tdl"
 
-	info, err := os.Stat(dirName)
-	if err == nil && info.IsDir() {
+	if _, err := os.Stat(dirName); err == nil {
 		fmt.Println("Directory already exists:", dirName)
 		return
 	}
 
-	// Only create if it doesn't exist
-	err = os.MkdirAll(dirName, 0755)
-	if err != nil {
+	if err := os.MkdirAll(dirName, 0755); err != nil {
 		fmt.Println("Error creating .tdl:", err)
 		return
 	}
@@ -53,47 +51,39 @@ func initTdl() {
 func destroyTdl() {
 	dirName := ".tdl"
 
-	info, err := os.Stat(dirName)
-	if os.IsNotExist(err) || !info.IsDir() {
+	if _, err := os.Stat(dirName); os.IsNotExist(err) {
 		fmt.Println("Directory does not exist:", dirName)
 		return
 	}
 
 	fmt.Printf("Are you sure you want to destroy '%s'? (y/N): ", dirName)
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
+	var input string
+	fmt.Scanln(&input)
 
-	if input != "y" && input != "yes" {
+	switch input {
+	case "y", "Y", "yes", "YES":
+		if err := os.RemoveAll(dirName); err != nil {
+			fmt.Println("Error destroying .tdl:", err)
+			return
+		}
+		fmt.Println("Destroyed:", dirName)
+	default:
 		fmt.Println("Aborted")
-		return
 	}
-
-	err = os.RemoveAll(dirName)
-	if err != nil {
-		fmt.Println("Error destroying .tdl:", err)
-		return
-	}
-
-	fmt.Println("Destroyed:", dirName)
 }
 
 // scanCodeBase handles scanning files and extracting comments
 func scanCodeBase(args []string) {
-	// Command-line flags for scanning
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	dirpath := fs.String("dirpath", ".", "Directory to recursively scan for files")
 	tag := fs.String("tag", "", "Comma-separated tags to filter by (TODO, FIXME, etc.)")
 	color := fs.Bool("color", true, "Enable colorized output")
+	printFlag := fs.Bool("print", false, "Also pretty-print comments after scanning")
 	ignore := fs.Bool("ignore", true, "Skip unsupported file extensions silently")
 	workers := fs.Int("workers", runtime.NumCPU(), "Number of concurrent worker goroutines")
-	output := fs.String("output", "", "Output format (json, yaml, text). Leave empty to skip file output.")
-	outputdir := fs.String("outputdir", ".", "Output dir for the resulting output file")
-	summarize := fs.Bool("summarize", false, "Print the frequency of each tag in the code base")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: tdl scan [options]")
-		fmt.Println("Options:")
 		fs.PrintDefaults()
 	}
 
@@ -109,39 +99,60 @@ func scanCodeBase(args []string) {
 	// Step 2: extract comments concurrently
 	results := core.RunExtractCommentsConcurrently(files, *workers, *tag, *ignore)
 
-	// Step 3: write output file if requested
-	if *output != "" {
-		if err := core.PrepareOutputFile(results, *output, *outputdir); err != nil {
-			fmt.Println("Error writing output:", err)
-		}
+	// Step 3: ensure .tdl exists
+	if err := os.MkdirAll(".tdl", 0755); err != nil {
+		fmt.Println("Failed to create .tdl directory:", err)
 		return
 	}
 
-	// Step 4: summarize tags if requested
-	if *summarize {
-		tags := map[string]int{
-			"TODO": 0, "FIXME": 0, "NOTE": 0, "HACK": 0, "BUG": 0, "OPTIMIZE": 0, "DEPRECATE": 0,
-		}
-
-		for _, result := range results {
-			for _, c := range result {
-				tags[c.Tag]++
-			}
-		}
-
-		for tag, count := range tags {
-			fmt.Printf("%s : %d\n", tag, count)
-		}
+	// Step 4: write results to JSON inside .tdl
+	if err := core.PrepareOutputFile(results, "json", ".tdl"); err != nil {
+		fmt.Println("Error writing output:", err)
 		return
 	}
 
-	// Step 5: normal pretty-print
-	core.PrettyPrintComments(results, *color)
+	// Step 5: pretty print if requested
+	if *printFlag {
+		core.PrettyPrintComments(results, *color)
+	}
 
 	totalComments := 0
 	for _, cs := range results {
 		totalComments += len(cs)
 	}
 	fmt.Printf("Scanned %d files, found %d comments.\n", len(files), totalComments)
+
+	// Pretty prints comments.json
+	// printComments pretty-prints existing comments.json from .tdl
+}
+
+func printComments() {
+	filePath := ".tdl/comments.json"
+	f, err := os.Open(filePath)
+	if err != nil {
+		fmt.Println("Error opening comments file:", err)
+		return
+	}
+	defer f.Close()
+
+	var all []core.Comment
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&all); err != nil {
+		fmt.Println("Error decoding JSON:", err)
+		return
+	}
+
+	// Convert to map[filePath][]Comment for PrettyPrintComments
+	results := make(map[string][]core.Comment)
+	for _, c := range all {
+		results[c.FilePath] = append(results[c.FilePath], c)
+	}
+
+	// Optionally, allow --color flag
+	fs := flag.NewFlagSet("print", flag.ExitOnError)
+	color := fs.Bool("color", true, "Enable colorized output")
+	fs.Parse(os.Args[2:])
+
+	core.PrettyPrintComments(results, *color)
 }
 
