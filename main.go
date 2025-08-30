@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+	// simple CLI dispatch based on first arg
 	if len(os.Args) < 2 {
 		fmt.Println("Expected subcommand: init | destroy | scan")
 		os.Exit(1)
@@ -17,20 +18,20 @@ func main() {
 
 	switch os.Args[1] {
 	case "init":
-		initTdl()
+		initTdl() // create .tdl dir
 	case "destroy":
-		destroyTdl()
+		destroyTdl() // remove .tdl with confirmation
 	case "scan":
-		scanCodeBase(os.Args[2:])
+		scanCodeBase(os.Args[2:]) // scan directory and extract comments
 	case "print":
-		printComments()
+		printComments() // pretty-print existing comments.json
 	default:
 		fmt.Println("Unknown command:", os.Args[1])
 		os.Exit(1)
 	}
 }
 
-// initTdl creates the .tdl directory
+// initTdl creates the .tdl directory if it doesn't exist
 func initTdl() {
 	dirName := ".tdl"
 
@@ -47,7 +48,7 @@ func initTdl() {
 	fmt.Println("Directory created:", dirName)
 }
 
-// destroyTdl deletes the .tdl directory recursively with confirmation
+// destroyTdl removes the .tdl directory after user confirmation
 func destroyTdl() {
 	dirName := ".tdl"
 
@@ -56,6 +57,7 @@ func destroyTdl() {
 		return
 	}
 
+	// confirm deletion
 	fmt.Printf("Are you sure you want to destroy '%s'? (y/N): ", dirName)
 	var input string
 	fmt.Scanln(&input)
@@ -72,16 +74,21 @@ func destroyTdl() {
 	}
 }
 
-// scanCodeBase handles scanning files and extracting comments
+// scanCodeBase is the main scanning workflow:
+// 1. collect files
+// 2. extract tagged comments concurrently
+// 3. write JSON to .tdl
+// 4. optionally pretty-print to console
 func scanCodeBase(args []string) {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
-	dirpath := fs.String("dirpath", ".", "Directory to recursively scan for files")
-	tag := fs.String("tag", "", "Comma-separated tags to filter by (TODO, FIXME, etc.)")
-	color := fs.Bool("color", true, "Enable colorized output")
-	printFlag := fs.Bool("print", false, "Also pretty-print comments after scanning")
+	dirpath := fs.String("dirpath", ".", "Directory to recursively scan")
+	tag := fs.String("tag", "", "Comma-separated tags to filter by")
+	color := fs.Bool("color", true, "Enable color output")
+	printFlag := fs.Bool("print", false, "Also pretty-print after scanning")
 	ignore := fs.Bool("ignore", true, "Skip unsupported file extensions silently")
-	workers := fs.Int("workers", runtime.NumCPU(), "Number of concurrent worker goroutines")
+	workers := fs.Int("workers", runtime.NumCPU(), "Number of concurrent workers")
 
+	// usage info if user messes up flags
 	fs.Usage = func() {
 		fmt.Println("Usage: tdl scan [options]")
 		fs.PrintDefaults()
@@ -89,14 +96,14 @@ func scanCodeBase(args []string) {
 
 	fs.Parse(args)
 
-	// Step 1: gather files
+	// Step 1: recursively collect files
 	files, err := core.GetAllFilePaths(*dirpath)
 	if err != nil {
 		fmt.Println("Error scanning directory:", err)
 		return
 	}
 
-	// Step 2: extract comments concurrently
+	// Step 2: extract comments using multiple goroutines
 	results := core.RunExtractCommentsConcurrently(files, *workers, *tag, *ignore)
 
 	// Step 3: ensure .tdl exists
@@ -105,27 +112,26 @@ func scanCodeBase(args []string) {
 		return
 	}
 
-	// Step 4: write results to JSON inside .tdl
+	// Step 4: save all extracted comments to JSON in .tdl
 	if err := core.PrepareOutputFile(results, "json", ".tdl"); err != nil {
 		fmt.Println("Error writing output:", err)
 		return
 	}
 
-	// Step 5: pretty print if requested
+	// Step 5: optionally pretty-print
 	if *printFlag {
 		core.PrettyPrintComments(results, *color)
 	}
 
+	// quick stats for user
 	totalComments := 0
 	for _, cs := range results {
 		totalComments += len(cs)
 	}
 	fmt.Printf("Scanned %d files, found %d comments.\n", len(files), totalComments)
-
-	// Pretty prints comments.json
-	// printComments pretty-prints existing comments.json from .tdl
 }
 
+// printComments reads comments.json from .tdl and pretty-prints them
 func printComments() {
 	filePath := ".tdl/comments.json"
 	f, err := os.Open(filePath)
@@ -142,13 +148,13 @@ func printComments() {
 		return
 	}
 
-	// Convert to map[filePath][]Comment for PrettyPrintComments
+	// convert to map[filePath][]Comment for PrettyPrintComments
 	results := make(map[string][]core.Comment)
 	for _, c := range all {
 		results[c.FilePath] = append(results[c.FilePath], c)
 	}
 
-	// Optionally, allow --color flag
+	// optional --color flag
 	fs := flag.NewFlagSet("print", flag.ExitOnError)
 	color := fs.Bool("color", true, "Enable colorized output")
 	fs.Parse(os.Args[2:])
