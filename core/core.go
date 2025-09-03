@@ -33,7 +33,7 @@ var (
 			".ts", ".js", ".jsx", ".tsx",
 		},
 		"#": {
-			"py", ".rb", ".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml", ".pl", ".pm", ".mk",
+			".py", ".rb", ".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml", ".pl", ".pm", ".mk",
 			"makefile", "dockerfile", ".ini",
 		},
 		";":  {".lisp", ".clj", ".scm", ".s", ".asm"},
