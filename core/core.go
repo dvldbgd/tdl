@@ -5,28 +5,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Comment is the struct we use to store tagged comments found in source files.
-// Keeps track of tag, content, file path, and line number.
+// Comment represents one tagged comment (TODO/FIXME/etc.) found in a source file.
+// It keeps the tag, the comment content, its location, and Git blame metadata.
 type Comment struct {
-	Tag        string `json:"tag" yaml:"tag"`
-	Content    string `json:"content" yaml:"content"`
-	FilePath   string `json:"file" yaml:"file"`
-	LineNumber int    `json:"line" yaml:"line"`
+	Tag           string `json:"tag" yaml:"tag"`         // The tag (TODO, FIXME, etc.)
+	Content       string `json:"content" yaml:"content"` // The full comment text
+	FilePath      string `json:"file" yaml:"file"`       // Path to the file containing this comment
+	LineNumber    int    `json:"line" yaml:"line"`       // Line number in the file
+	CreationStamp string `json:"stamp" yaml:"stamp"`     // RFC3339 timestamp from Git blame
+	Author        string `json:"author" yaml:"author"`   // Author of the commit that introduced this line
+	Commit        string `json:"commit" yaml:"commit"`   // Commit hash from Git blame
 }
 
 var (
-	// Mapping of single-line comment syntax to file extensions that use it
+	// Maps single-line comment delimiters to file extensions that use them.
+	// This lets the scanner know how to detect comments in different languages.
 	singleLineCommentMap = map[string][]string{
 		"//": {
 			".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".rs", ".scala",
@@ -42,19 +49,22 @@ var (
 		"..": {".rst"},
 	}
 
-	// Tags we care about scanning for
+	// List of supported tags to detect
 	SupportedTags       = []string{"TODO", "FIXME", "NOTE", "HACK", "BUG", "OPTIMIZE", "DEPRECATE"}
-	supportedTagsLookup = make(map[string]struct{}) // quick lookup
-	extensionToChar     = make(map[string]string)   // map extension to comment char
+	supportedTagsLookup = make(map[string]struct{}) // fast lookup map of tags
+	extensionToChar     = make(map[string]string)   // maps file extension -> comment delimiter
 
-	maxScanCapacity = 1024 * 1024 // scanner buffer limit, 1MB
+	// Scanner buffer limit (1MB)
+	maxScanCapacity = 1024 * 1024
 )
 
-// init precomputes lookup maps for tags and file extensions to comment chars
+// init builds lookup maps for faster scanning at runtime.
 func init() {
+	// Build set of supported tags for O(1) lookups.
 	for _, tag := range SupportedTags {
 		supportedTagsLookup[tag] = struct{}{}
 	}
+	// Map each extension to its comment delimiter (e.g. ".go" -> "//")
 	for ch, exts := range singleLineCommentMap {
 		for _, e := range exts {
 			extensionToChar[strings.ToLower(e)] = ch
@@ -62,9 +72,47 @@ func init() {
 	}
 }
 
-// RunExtractCommentsConcurrently scans multiple files at once.
-// It spins up maxWorkers goroutines and distributes files to them.
-// Results are stored in a map keyed by file path.
+// fetchGitBlameInfo gets commit, author, and timestamp for a given file+line.
+// It runs: git blame -L <line>,<line> --porcelain -- <file>
+func fetchGitBlameInfo(filePath string, line int) (commit, author, stamp string, err error) {
+	cmd := exec.Command("git", "blame", "-L", fmt.Sprintf("%d,%d", line, line),
+		"--porcelain", "--", filePath)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", "", "", err
+	}
+
+	lines := strings.Split(string(out), "\n")
+	if len(lines) == 0 {
+		return "", "", "", fmt.Errorf("empty blame output")
+	}
+
+	// First line contains commit hash
+	parts := strings.Fields(lines[0])
+	if len(parts) > 0 {
+		commit = parts[0]
+	}
+
+	// Parse metadata: author and author-time
+	for _, l := range lines {
+		if strings.HasPrefix(l, "author ") {
+			author = strings.TrimPrefix(l, "author ")
+		}
+		if strings.HasPrefix(l, "author-time ") {
+			// Convert UNIX timestamp -> RFC3339 format
+			ts := strings.TrimPrefix(l, "author-time ")
+			i, err := strconv.ParseInt(ts, 10, 64)
+			if err == nil {
+				stamp = time.Unix(i, 0).Format(time.RFC3339)
+			}
+		}
+	}
+
+	return commit, author, stamp, nil
+}
+
+// RunExtractCommentsConcurrently processes multiple files in parallel.
+// Uses worker goroutines to avoid bottlenecks on large repos.
 func RunExtractCommentsConcurrently(
 	files []string, maxWorkers int, tags string, ignoreErrors bool,
 ) map[string][]Comment {
@@ -73,18 +121,19 @@ func RunExtractCommentsConcurrently(
 		return results
 	}
 
+	// Default worker count to CPU cores
 	if maxWorkers <= 0 {
-		maxWorkers = runtime.NumCPU() // default to number of CPU cores
+		maxWorkers = runtime.NumCPU()
 	}
 	if maxWorkers > len(files) {
-		maxWorkers = len(files) // don't spawn more workers than files
+		maxWorkers = len(files) // don’t spawn more workers than files
 	}
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	ch := make(chan string, len(files)) // buffered channel to hold all file paths
+	ch := make(chan string, len(files)) // buffered channel holds all files
 
-	// worker reads file paths from channel and extracts comments
+	// Worker: consumes file paths, extracts comments, stores them in results
 	worker := func() {
 		defer wg.Done()
 		for file := range ch {
@@ -100,22 +149,23 @@ func RunExtractCommentsConcurrently(
 		}
 	}
 
+	// Start workers
 	wg.Add(maxWorkers)
 	for i := 0; i < maxWorkers; i++ {
 		go worker()
 	}
 
+	// Send all files into channel
 	for _, f := range files {
 		ch <- f
 	}
-	close(ch) // no more files, workers will exit
+	close(ch)
 	wg.Wait()
 
 	return results
 }
 
-// PrepareOutputFile writes the extracted comments to JSON, YAML, or plain text.
-// Automatically creates the output directory if needed.
+// PrepareOutputFile saves results to disk in JSON, YAML, or plain text format.
 func PrepareOutputFile(results map[string][]Comment, format, outputDir string) error {
 	var all []Comment
 	for _, list := range results {
@@ -129,6 +179,7 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 	fileName := "comments." + ext
 	outPath := filepath.Join(outputDir, fileName)
 
+	// Create output directory if it doesn’t exist
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -139,6 +190,7 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 	}
 	defer f.Close()
 
+	// Write in requested format
 	switch ext {
 	case "json":
 		enc := json.NewEncoder(f)
@@ -154,7 +206,8 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 		}
 	case "text", "txt":
 		for _, c := range all {
-			if _, err := fmt.Fprintf(f, "%s:%d [%s] %s\n", c.FilePath, c.LineNumber, c.Tag, c.Content); err != nil {
+			if _, err := fmt.Fprintf(f, "%s:%d [%s] %s\n",
+				c.FilePath, c.LineNumber, c.Tag, c.Content); err != nil {
 				return fmt.Errorf("failed to write text: %w", err)
 			}
 		}
@@ -166,13 +219,14 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 	return nil
 }
 
-// ExtractComments scans a single file line by line for tags we care about.
-// Returns all matches or an error if the file can't be opened/read.
+// ExtractComments scans one file line by line for tagged comments.
 func ExtractComments(filePath, tags string) ([]Comment, error) {
+	// Resolve extension or basename (e.g. Makefile)
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext == "" {
-		ext = strings.ToLower(filepath.Base(filePath)) // fallback for files without extension
+		ext = strings.ToLower(filepath.Base(filePath))
 	}
+
 	char, ok := extensionToChar[ext]
 	if !ok {
 		return nil, nil // unsupported file type
@@ -196,15 +250,21 @@ func ExtractComments(filePath, tags string) ([]Comment, error) {
 		line := sc.Text()
 		pos := strings.Index(line, char)
 		if pos == -1 {
-			continue // line doesn't contain a comment
+			continue // skip lines without comment delimiter
 		}
 		text := strings.TrimSpace(line[pos+len(char):])
+
+		// If the comment contains a supported tag, capture it
 		if tag := findTag(text, tagSet); tag != "" {
+			commit, author, stamp, _ := fetchGitBlameInfo(filePath, lineNum)
 			out = append(out, Comment{
-				Tag:        tag,
-				Content:    text,
-				FilePath:   filePath,
-				LineNumber: lineNum,
+				Tag:           tag,
+				Content:       text,
+				FilePath:      filePath,
+				LineNumber:    lineNum,
+				Commit:        commit,
+				Author:        author,
+				CreationStamp: stamp,
 			})
 		}
 	}
@@ -214,10 +274,10 @@ func ExtractComments(filePath, tags string) ([]Comment, error) {
 	return out, nil
 }
 
-// parseTags converts a comma-separated string into a set for quick lookup
+// parseTags converts a comma-separated string into a lookup map of tags.
 func parseTags(tags string) map[string]struct{} {
-	// if empty, return a copy of all supported tags
 	if strings.TrimSpace(tags) == "" {
+		// If no tags provided, use default SupportedTags
 		set := make(map[string]struct{}, len(supportedTagsLookup))
 		for tag := range supportedTagsLookup {
 			set[tag] = struct{}{}
@@ -226,8 +286,8 @@ func parseTags(tags string) map[string]struct{} {
 	}
 
 	parts := strings.Split(tags, ",")
-	set := make(map[string]struct{}, len(parts)) // preallocate
-	for _, t := range parts {                    // range over slice
+	set := make(map[string]struct{}, len(parts))
+	for _, t := range parts {
 		trimmed := strings.ToUpper(strings.TrimSpace(t))
 		if trimmed != "" {
 			set[trimmed] = struct{}{}
@@ -236,11 +296,11 @@ func parseTags(tags string) map[string]struct{} {
 	return set
 }
 
-// findTag checks if any of the allowed tags exist in the text
+// findTag checks if any supported tag exists in the given text.
 func findTag(text string, tags map[string]struct{}) string {
 	upper := strings.ToUpper(text)
 	for t := range tags {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(t) + `\b`) // exact word match
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(t) + `\b`)
 		if re.MatchString(upper) {
 			return t
 		}
@@ -248,7 +308,7 @@ func findTag(text string, tags map[string]struct{}) string {
 	return ""
 }
 
-// isBinaryFile does a cheap check if a file contains null bytes
+// isBinaryFile checks for null bytes to decide if a file is binary.
 func isBinaryFile(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -258,12 +318,10 @@ func isBinaryFile(path string) bool {
 
 	buf := make([]byte, 8192)
 	n, _ := f.Read(buf)
-
-	// check if 0 exists in the slice of read bytes
 	return slices.Contains(buf[:n], byte(0))
 }
 
-// GetAllFilePaths recursively collects all files that can contain comments
+// GetAllFilePaths walks a directory tree and returns all supported text files.
 func GetAllFilePaths(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
@@ -277,10 +335,8 @@ func GetAllFilePaths(root string) ([]string, error) {
 		if ext == "" {
 			ext = strings.ToLower(filepath.Base(path))
 		}
-		if _, ok := extensionToChar[ext]; !ok {
-			return nil
-		}
-		if isBinaryFile(path) {
+		// Skip unsupported or binary files
+		if _, ok := extensionToChar[ext]; !ok || isBinaryFile(path) {
 			return nil
 		}
 		out = append(out, path)
@@ -289,17 +345,17 @@ func GetAllFilePaths(root string) ([]string, error) {
 	return out, err
 }
 
-// PrettyPrintComments prints all comments to stdout, optionally with ANSI colors
+// PrettyPrintComments outputs results to stdout with optional ANSI colors.
 func PrettyPrintComments(m map[string][]Comment, color bool) {
 	const reset = "\033[0m"
 	colors := map[string]string{
-		"TODO":      "\033[33m",
-		"FIXME":     "\033[31m",
-		"NOTE":      "\033[36m",
-		"HACK":      "\033[35m",
-		"BUG":       "\033[91m",
-		"OPTIMIZE":  "\033[32m",
-		"DEPRECATE": "\033[90m",
+		"TODO":      "\033[33m", // yellow
+		"FIXME":     "\033[31m", // red
+		"NOTE":      "\033[36m", // cyan
+		"HACK":      "\033[35m", // magenta
+		"BUG":       "\033[91m", // bright red
+		"OPTIMIZE":  "\033[32m", // green
+		"DEPRECATE": "\033[90m", // grey
 	}
 
 	files := make([]string, 0, len(m))
@@ -319,6 +375,7 @@ func PrettyPrintComments(m map[string][]Comment, color bool) {
 			fmt.Println("    No tagged comments found")
 			continue
 		}
+		// Sort comments in file by line number
 		sort.Slice(list, func(i, j int) bool { return list[i].LineNumber < list[j].LineNumber })
 		for _, c := range list {
 			line := fmt.Sprintf("%-5d", c.LineNumber)
