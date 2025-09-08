@@ -1,6 +1,8 @@
 # TDL Usage Guide
 
-This document explains how to use the `tdl` command-line tool to manage your project and scan your codebase for tagged comments.
+`tdl` is a command-line tool to manage your project’s `.tdl` directory and scan your codebase for tagged comments (TODOs, FIXMEs, etc.).
+
+---
 
 ## Commands
 
@@ -22,62 +24,65 @@ tdl destroy
 ```
 
 - Deletes the `.tdl` directory and all its contents.
-- Prompts for confirmation before deletion.
-- Example confirmation:
+- Prompts for confirmation before deletion:
 
 ```
 Are you sure you want to destroy '.tdl'? (y/N):
 ```
+
+- Any response other than `y`, `Y`, `yes`, or `YES` aborts the deletion.
 
 ---
 
 ### Scan your codebase for tagged comments
 
 ```bash
-tdl scan [options]
+tdl scan [flags]
 ```
 
-- Recursively scans files in a specified directory.
-- Extracts comments containing tags: `TODO`, `FIXME`, `NOTE`, `HACK`, `BUG`, `OPTIMIZE`, `DEPRECATE`.
+- Recursively scans a directory for comments containing tags:
+  `TODO`, `FIXME`, `NOTE`, `HACK`, `BUG`, `OPTIMIZE`, `DEPRECATE`.
+- Saves results in `.tdl/comments.json` by default.
+- Optionally pretty-prints results with colors and displays stats.
 
 ---
 
-## Scan Options (Flags)
+## Scan Flags
 
-| Flag         | Type   | Default             | Description                                                        |
-| ------------ | ------ | ------------------- | ------------------------------------------------------------------ |
-| `-dirpath`   | string | `.`                 | Directory to recursively scan. Accepts relative or absolute paths. |
-| `-tag`       | string | All supported       | Comma-separated list of tags to filter (e.g., `TODO,FIXME`).       |
-| `-color`     | bool   | `true`              | Enable colorized output for easier readability.                    |
-| `-ignore`    | bool   | `true`              | Skip unsupported file extensions silently without printing errors. |
-| `-workers`   | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning.        |
-| `-output`    | string | Empty               | File format for saving results (`json`, `yaml`, `text`).           |
-| `-outputdir` | string | `.`                 | Directory path to save the output file.                            |
-| `-summarize` | bool   | `false`             | Prints the frequency of each tag in the scanned codebase.          |
+| Flag       | Type   | Default             | Description                                                 |
+| ---------- | ------ | ------------------- | ----------------------------------------------------------- |
+| `-dirpath` | string | `.`                 | Directory to recursively scan.                              |
+| `-tag`     | string | All supported       | Comma-separated tags to filter by (e.g., `TODO,FIXME`).     |
+| `-color`   | bool   | `true`              | Enable colorized output.                                    |
+| `-ignore`  | bool   | `true`              | Skip unsupported or binary files silently.                  |
+| `-workers` | int    | Number of CPU cores | Number of concurrent worker goroutines for faster scanning. |
+| `-print`   | bool   | `false`             | Pretty-print results after scanning.                        |
+
+> Notes: Output is always saved to `.tdl/comments.json. YAML or text output is not currently supported in CLI flags. For custom formats, see `core.PrepareOutputFile\` usage in code.
 
 ---
 
 ## Examples
 
-### Initialize the `.tdl` directory
+### Initialize `.tdl`
 
 ```bash
 tdl init
 ```
 
-### Destroy the `.tdl` directory (with confirmation)
+### Destroy `.tdl` (with confirmation)
 
 ```bash
 tdl destroy
 ```
 
-### Scan the current directory for all supported tags
+### Scan current directory for all tags
 
 ```bash
 tdl scan
 ```
 
-### Scan a specific directory for TODO and FIXME comments only
+### Scan a specific directory for TODO and FIXME
 
 ```bash
 tdl scan -dirpath ./myproject -tag TODO,FIXME
@@ -95,25 +100,20 @@ tdl scan -color=false
 tdl scan -workers=4
 ```
 
-### Save results to a JSON file
+### Pretty-print results immediately after scanning
 
 ```bash
-tdl scan -output=json -outputdir=reports
-```
-
-### Show a summary of all tags in the codebase
-
-```bash
-tdl scan -summarize
+tdl scan -print
 ```
 
 ---
 
 ## Notes
 
-- **Supported file types** include Go, Python, JavaScript, C, C++, Java, Lua, Bash, YAML, and more. See `core.go` for the full mapping in `singleLineCommentMap`.
-- `.gitignore` rules are respected only for **untracked** files; tracked files will still be scanned.
-- For large projects, increasing the number of workers can improve performance, but too many may overload the system.
+- **Supported file types** include Go, Python, JavaScript, C, C++, Java, Lua, Bash, YAML, and more. See `core.go` `singleLineCommentMap` for the full mapping.
+- Git blame metadata (author, commit, timestamp) is automatically attached to each comment.
+- Large projects benefit from increasing worker count, but spawning too many may overload the system.
+- Comments are grouped and sorted by file and line number for easy reading.
 
 ---
 
