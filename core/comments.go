@@ -35,7 +35,7 @@ var (
 	supportedTagsLookup = make(map[string]struct{}) // fast lookup map of tags
 	extensionToChar     = make(map[string]string)   // maps file extension -> comment delimiter
 
-	// Scanner buffer limit (1MB)
-	maxScanCapacity = 1024 * 1024
+	// Scanner buffer limit (256KB)
+	maxScanCapacity = 256 * 1024
 )
 
