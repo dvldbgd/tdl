@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PrepareOutputFile saves results to disk in JSON, YAML, or plain text format.
+// PrepareOutputFile writes results in JSON, YAML, or text format.
 func PrepareOutputFile(results map[string][]Comment, format, outputDir string) error {
 	var all []Comment
 	for _, list := range results {
@@ -22,10 +22,8 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 	}
 
 	ext := strings.ToLower(format)
-	fileName := "comments." + ext
-	outPath := filepath.Join(outputDir, fileName)
+	outPath := filepath.Join(outputDir, "comments."+ext)
 
-	// Create output directory if it doesn’t exist
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -36,7 +34,6 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 	}
 	defer f.Close()
 
-	// Write in requested format
 	switch ext {
 	case "json":
 		enc := json.NewEncoder(f)
@@ -65,7 +62,7 @@ func PrepareOutputFile(results map[string][]Comment, format, outputDir string) e
 	return nil
 }
 
-// PrettyPrintComments outputs results to stdout with optional ANSI colors.
+// PrettyPrintComments prints comments grouped by file with optional colors.
 func PrettyPrintComments(m map[string][]Comment, color bool) {
 	const reset = "\033[0m"
 	colors := map[string]string{
@@ -95,13 +92,13 @@ func PrettyPrintComments(m map[string][]Comment, color bool) {
 			fmt.Println("    No tagged comments found")
 			continue
 		}
-		// Sort comments in file by line number
+
 		sort.Slice(list, func(i, j int) bool { return list[i].LineNumber < list[j].LineNumber })
 		for _, c := range list {
 			line := fmt.Sprintf("%-5d", c.LineNumber)
 			if color {
-				col, ok := colors[c.Tag]
-				if !ok {
+				col := colors[c.Tag]
+				if col == "" {
 					col = reset
 				}
 				fmt.Printf("    %s %s%s%s\n", line, col, c.Content, reset)
@@ -110,6 +107,54 @@ func PrettyPrintComments(m map[string][]Comment, color bool) {
 			}
 		}
 		fmt.Println()
+	}
+}
+
+// CreateReport counts frequency of tags in comments.json
+func CreateReport(tag string) {
+	type LogEntry struct {
+		Tag           string `json:"tag"`
+		Content       string `json:"content"`
+		FilePath      string `json:"file"`
+		LineNumber    int    `json:"line"`
+		CreationStamp string `json:"stamp"`
+		Author        string `json:"author"`
+		Commit        string `json:"commit"`
+	}
+
+	path := filepath.Join(".tdl", "comments.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+
+	var comments []LogEntry
+	if err := json.Unmarshal(data, &comments); err != nil {
+		panic(err)
+	}
+
+	count := map[string]int32{
+		"TODO": 0, "FIXME": 0, "NOTE": 0,
+		"HACK": 0, "BUG": 0, "OPTIMIZE": 0, "DEPRECATE": 0,
+	}
+
+	for _, c := range comments {
+		if _, ok := count[strings.ToUpper(c.Tag)]; ok {
+			count[strings.ToUpper(c.Tag)]++
+		}
+	}
+
+	if strings.ToLower(tag) == "all" || tag == "" {
+		for t, cnt := range count {
+			fmt.Printf("%s => %d\n", t, cnt)
+		}
+	} else {
+		for _, t := range strings.Split(tag, ",") {
+			t = strings.ToUpper(strings.TrimSpace(t))
+			if cnt, ok := count[t]; ok {
+				fmt.Printf("%s => %d\n", t, cnt)
+			}
+		}
 	}
 }
 
